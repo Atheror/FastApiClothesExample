@@ -1,5 +1,6 @@
+import jwt
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timedelta
 from decouple import config
 from email_validator import validate_email as validate_e
 from email_validator.exceptions_types import EmailNotValidError
@@ -106,14 +107,21 @@ class BaseUser(BaseModel):
 class UserSignIn(BaseUser):
     password: str
 
-class UserSignOut(BaseUser):
-    phone: str | None = None
-    created_at: datetime | None = None
-    last_modified_at: datetime | None = None
-
 app = FastAPI()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def create_access_token(user):
+    try:
+        payload = {
+            "sub": user["id"],
+            "exp": datetime.utcnow() + timedelta(minutes=120),
+        }
+        return jwt.encode(payload, config("JWT_SECRET"), algorithm="HS256")
+    except Exception as ex:
+        raise ex
+
+
 
 @app.on_event("startup")
 async def startup():
@@ -124,13 +132,15 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-@app.post("/register/", response_model=UserSignOut)
+@app.post("/register/")
 async def create_user(user: UserSignIn):
     user.password = pwd_context.hash(user.password)
     q = users.insert().values(**user.dict())
     id_ = await database.execute(q)
     created_user = await database.fetch_one(users.select().where(users.c.id == id_))
-    return created_user
+    token = create_access_token(created_user)
+    return {"token": token}
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8086)
+    uvicorn.run(app, host="localhost", port=8086)
