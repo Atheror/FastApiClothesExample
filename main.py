@@ -1,10 +1,12 @@
+from typing import Optional
 import jwt
 import uvicorn
 from datetime import datetime, timedelta
 from decouple import config
 from email_validator import validate_email as validate_e
 from email_validator.exceptions_types import EmailNotValidError
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from pydantic import BaseModel, validator
 import databases
@@ -110,6 +112,24 @@ class UserSignIn(BaseUser):
 app = FastAPI()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class CustomHTTPBearer(HTTPBearer):
+    async def __call__(
+        self, request: Request
+    ) -> Optional[HTTPAuthorizationCredentials]:
+        res = await super().__call__(request)
+    
+        try:
+            payload = jwt.decode(res.credentials, config("JWT_SECRET"), algorithms=["HS256"])
+            user = await database.fetch_one(users.select().where(users.c.id == payload["sub"]))
+            request.state.user = user
+            return payload
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(401, "Token has expired")
+        except jwt.InvalidTokenError:
+            raise HTTPException(401, "Token is invalid")
+
+oauth2_scheme = CustomHTTPBearer()
 
 def create_access_token(user):
     try:
