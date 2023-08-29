@@ -43,7 +43,7 @@ users = sqlalchemy.Table(
     ),
     sqlalchemy.Column("role", sqlalchemy.Enum(UserRole), nullable=False, default=UserRole.user, server_default=UserRole.user.value),
 )
-
+ 
 
 class ColorEnum(enum.Enum):
     pink = "pink"
@@ -113,6 +113,7 @@ class BaseUser(BaseModel):
 
 class UserSignIn(BaseUser):
     password: str
+    role: UserRole = UserRole.user
 
 app = FastAPI()
 
@@ -135,6 +136,11 @@ class CustomHTTPBearer(HTTPBearer):
             raise HTTPException(401, "Token is invalid")
 
 oauth2_scheme = CustomHTTPBearer()
+
+def is_admin(request: Request):
+    user = request.state.user
+    if not user or user["role"] not in (UserRole.admin, UserRole.super_admin):
+        raise HTTPException(403, "You are not allowed to perform this action")
 
 def create_access_token(user):
     try:
@@ -159,7 +165,32 @@ async def get_all_clothes(request: Request):
     user = request.state.user
     return await database.fetch_all(clothes.select())
 
-@app.post("/register/")
+class ClothesBase(BaseModel):
+    name: str
+    color: ColorEnum
+    size: SizeEnum
+    photo_url: str
+
+class ClothesIn(ClothesBase):
+    pass
+
+class ClothesOut(ClothesBase):
+    id: int
+    created_at: datetime
+    last_modified_at: datetime
+
+@app.post("/clothes/",
+          response_model=ClothesOut,
+          dependencies=[Depends(oauth2_scheme), Depends(is_admin)],
+          status_code=201
+          )
+async def create_clothes(clothes_data: ClothesIn):
+    id_ = await database.execute(clothes.insert().values(**clothes_data.dict()))
+    return await database.fetch_one(clothes.select().where( clothes.c.id == id_))
+
+
+
+@app.post("/register/", status_code=201)
 async def create_user(user: UserSignIn):
     user.password = pwd_context.hash(user.password)
     q = users.insert().values(**user.dict())
