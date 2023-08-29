@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from decouple import config
 from email_validator import validate_email as validate_e
 from email_validator.exceptions_types import EmailNotValidError
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from pydantic import BaseModel, validator
@@ -105,7 +105,6 @@ class BaseUser(BaseModel):
         except Exception:
             raise ValueError("You should enter your first name and last name")
 
-
 class UserSignIn(BaseUser):
     password: str
 
@@ -141,16 +140,18 @@ def create_access_token(user):
     except Exception as ex:
         raise ex
 
-
-
 @app.on_event("startup")
 async def startup():
     await database.connect()
 
-
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
+
+@app.get("/clothes/", dependencies=[Depends(oauth2_scheme)])
+async def get_all_clothes(request: Request):
+    user = request.state.user
+    return await database.fetch_all(clothes.select())
 
 @app.post("/register/")
 async def create_user(user: UserSignIn):
